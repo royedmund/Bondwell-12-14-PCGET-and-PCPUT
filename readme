@@ -1,0 +1,7 @@
+BONDWELL 12/14 PCGET AND PCPUT BASED ON THE WORK OF DeRamP https://deramp.com/
+
+Xmodem transfer utility for the Bondwell 12/14 modified from the Kaypro 10 version
+
+
+Port A at 40H/41H
+Port B at 42H/43H
