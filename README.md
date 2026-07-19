@@ -12,5 +12,5 @@ B SIO1: 42H data, 43H status/control
 ----------------------------------
 Also working on KERMIT for the Bondwell 12/14
 
-VT52 support only with  9600 8 bits and parity none.
+VT52 support only with a fixed 9600 baud rate with 8 bits and parity set to none.
 
