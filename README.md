@@ -11,4 +11,5 @@ B SIO1: 42H data, 43H status/control
 
 ----------------------------------
 Also working on KERMIT for the Bondwell 12/14
+VT52 support only
 
