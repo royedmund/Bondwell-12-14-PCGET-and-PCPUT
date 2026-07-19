@@ -1,0 +1,23 @@
+KERMTBW documented disassembly 
+
+Original KERMTKP.COM
+  Size 13312 bytes
+  SHA-256 82413f21cab425f5f31548674d1d07b4a9b972770db472eadd26e96ac5cf482e
+
+Patched KERMTBW.COM
+  Size 13312 bytes
+  SHA-256 8addf4a7bdc43dbce2bf6fdc4b8105763878f9fe5914f4bad6cdc607f80b5d8a
+
+Identified communications routines
+  0F3BH transmitter-ready polling
+  0F46H transmit byte
+  0F4FH receiver-ready polling
+  0F93H receive byte
+  148AH terminal-mode receiver polling
+  148FH terminal-mode receive byte
+  1B98H secondary transmitter-ready polling
+  1B9FH secondary transmit byte
+
+The ASM uses DB directives for exact reproduction. Linear Z80 decoding is
+provided in comments because the complete linked image contains mixed code,
+text, jump tables and configuration data.
