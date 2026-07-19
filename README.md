@@ -6,7 +6,9 @@ PCGET and PCPUT are based on the work of DeRamp https://deramp.com and were adap
 
 Bondwell serial port addresses:
 
-SIO0: 40H data, 41H status/control
+A SIO0: 40H data, 41H status/control
+B SIO1: 42H data, 43H status/control
 
-SIO1: 42H data, 43H status/control
+----------------------------------
+Also working on KERMIT for the Bondwell 12/14
 
