@@ -1,4 +1,4 @@
-XMODEM Transfer Utilities for the Bondwell 12/14
+XMODEM Transfer Utilities for the Bondwell 12/14 Z80 CP/M 2.2 and 3.0 (CP/M PLUS)
 
 These two utilities allow you to transfer files between a Bondwell CP/M system and any other computer that supports XMODEM send and receive.
 
