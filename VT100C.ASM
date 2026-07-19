@@ -2,7 +2,7 @@
 ; Bondwell 12/14 CP/M VT100-compatible serial terminal
 ;
 ; Z80 source intended for PASMO / Z80ASM-style assemblers.
-; Assemble at 0x0100 to create BWT100.COM.
+; Assemble at 0x0100 to create VT100C.COM.
 ;
 ; Confirmed from supplied BOOTROM.BIN:
 ;   Video RAM base = F800H
