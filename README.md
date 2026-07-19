@@ -15,5 +15,6 @@ Also working on KERMIT for the Bondwell 12/14
 The current KERMBW.COM is very buggy.
 VT52 support only with a fixed 9600 baud rate with 8 bits and parity set to none.
 
+Standalone VT100 Terminal
 VT100C.COM - VT100 terminal SIO0 9600N8
 
