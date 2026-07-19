@@ -1,0 +1,88 @@
+Bondwell 12/14 Kermit-80 V3.9A binary patch
+================================================
+
+Input files
+-----------
+KERMTKP.COM  82413f21cab425f5f31548674d1d07b4a9b972770db472eadd26e96ac5cf482e
+BOOTROM.BIN  e7c29a43d2c526abcee01ae0121bb4c6557ac944590a6160200f8a644e2a5772
+CHAROM.BIN   d1aa202af7d68535fe21b4d88c156e5d0d29a35c5646e5c013b7e2e4f20b3e67
+
+Output files
+------------
+KERMTBW.COM  309af52238d1784e4e25d84dfe58612e2f4d18dfa1ca34ce7ced610bb961697b
+KERMTBW.HEX  2aad862039e740cabb626ddc104087f2e3e38d477f3f2bd84fa6686736e1b5fb
+
+Serial interface
+----------------
+Bondwell SIO0:
+  Data port:             40H
+  Status/control port:   41H
+  Receive-ready bit:     bit 0
+  Transmit-ready bit:    bit 2
+
+Patched KERMTKP.COM file offsets:
+  0E3C: 06 -> 41
+  0E47: 04 -> 40
+  0E50: 06 -> 41
+  0E94: 04 -> 40
+  138B: 06 -> 41
+  1390: 04 -> 40
+  1A99: 06 -> 41
+  1AA1: 04 -> 40
+
+The displayed machine name was changed from:
+  Kermit-80 V3.9A [Kaypro II]
+to:
+  Kermit-80 V3.9A [Bondwell ]
+
+Video memory and character ROM review
+-------------------------------------
+BOOTROM.BIN and CHAROM.BIN are both 4096 bytes.
+
+The Bondwell has 2 KB of video memory, sufficient for an 80 x 25 text
+display (2000 character positions). The Kermit binary does not contain
+an explicit 00 F8 little-endian screen-base constant and this patch does
+not add direct video-memory writes. Local screen output remains through
+the existing CP/M/Kermit console path, leaving display-memory management
+to the Bondwell CP/M BIOS and hardware.
+
+CHAROM.BIN contains the local character-generator bitmaps. It does not
+define keyboard control-key codes, so keyboard generation of a particular
+control character cannot be proven from CHAROM.BIN alone.
+
+CONNECT-mode exit
+-----------------
+The supplied Kermit already contains its CONNECT escape-command handler,
+including these messages:
+  [Connected to remote host, type <escape>C to return]
+  [Connection closed, back at micro]
+  C  Close the connection
+
+During a CONNECT session:
+  1. Press the configured Kermit escape control character.
+  2. Release it.
+  3. Press C.
+
+Kermit-80 commonly uses a control escape such as Ctrl-\ or Ctrl-].
+The exact configured character is printed when CONNECT starts.
+
+The program also contains:
+  SET ESCAPE
+
+Use SET ESCAPE at the Kermit-80 prompt to select a control character that
+the Bondwell keyboard can generate. Ctrl-] is ASCII 29 decimal (1DH).
+After setting it, exit CONNECT by pressing Ctrl-], then C.
+
+To leave Kermit entirely after returning to the Kermit-80 prompt, use:
+  EXIT
+or:
+  QUIT
+
+Verification limits
+-------------------
+BOOTROM.BIN is a boot and diagnostic ROM, not the complete CP/M 3 BIOS.
+It confirms the Bondwell hardware environment but cannot fully prove the
+runtime console-driver behaviour used after CP/M has booted. CHAROM.BIN
+confirms glyph storage only, not keyboard translation. Hardware testing
+is therefore still required for cursor movement, clearing, scrolling,
+keyboard control characters and SIO ready-bit polarity.
