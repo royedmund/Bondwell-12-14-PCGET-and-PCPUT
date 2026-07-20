@@ -70,3 +70,6 @@ Many other VT100 features will also remain unsupported because they would requir
 
 This software should therefore be considered a limited VT100-compatible terminal implementation rather than a complete VT100 emulator.
 
+TODO
+Add Bondwell Function keys and Cursor keys controls for the VT100 emulation.
+
