@@ -22,7 +22,7 @@ VT100C.COM - VT100 terminal SIO0 9600N8
 
 VT100DG.COM - VT100 terminal emulation test with limited DEC Special Graphics. Using the new Character ROM (2732 Eprom)
 
-Now I’m creating a new character ROM that includes the DEC Special Graphics character set for slightly better VT100 compatibility. I’m also adding support for inverse characters in the terminal code. 
+Now created a new character ROM that includes the DEC Special Graphics character set for slightly better VT100 compatibility. I’m also adding support for inverse characters in the terminal code. 
 Double-height and double-width characters will not be possible without hardware modifications, so they will not be implemented. Underlining and bold text will also not be supported because of the current hardware and character ROM limitations.
 ----------------------------------
 
