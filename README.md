@@ -32,7 +32,7 @@ Current limitations include:
 * 8 data bits
 * No parity
 
-## Standalone VT100 Terminal
+## Standalone VT100 Terminal Emulation
 
 The repository also contains experimental standalone VT100 terminal programs.
 
