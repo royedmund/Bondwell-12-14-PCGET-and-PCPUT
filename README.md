@@ -70,4 +70,3 @@ Many other VT100 features will also remain unsupported because they would requir
 
 This software should therefore be considered a limited VT100-compatible terminal implementation rather than a complete VT100 emulator.
 
-This version uses clearer headings, consistent program names, a serial-port table, and GitHub-friendly Markdown formatting.
