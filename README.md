@@ -1,28 +1,73 @@
-XMODEM Transfer Utilities for the Bondwell 12/14 Z80 CP/M 2.2 and 3.0 (CP/M PLUS)
+Here is a polished version for your GitHub `README.md`:
 
-These two utilities allow you to transfer files between a Bondwell CP/M system and any other computer that supports XMODEM send and receive.
+# XMODEM Transfer Utilities for the Bondwell 12/14
 
-PCGET and PCPUT are based on the work of DeRamp https://deramp.com and were adapted from the Kaypro 10 versions for the Bondwell 12/14 serial ports.
+XMODEM file transfer utilities for the Bondwell 12 and Bondwell 14 Z80 computers running CP/M 2.2 or CP/M 3.0 Plus.
 
-Bondwell serial port addresses:
+These utilities allow files to be transferred between a Bondwell CP/M system and any other computer that supports XMODEM send and receive.
 
-A SIO0: 40H data, 41H status/control
+`PCGET` and `PCPUT` are based on the work of DeRamp:
 
-B SIO1: 42H data, 43H status/control
+[https://deramp.com](https://deramp.com)
 
-----------------------------------
-Also working on KERMIT for the Bondwell 12/14
+They were adapted from the Kaypro 10 versions for use with the Bondwell 12/14 serial ports.
 
-The current KERMBW.COM is very buggy.
-VT52 support only with a fixed 9600 baud rate with 8 bits and parity set to none.
-----------------------------------
-Standalone VT100 Terminal
+## Bondwell Serial Port Addresses
 
-VT100C.COM - VT100 terminal SIO0 9600N8
+| Port | Device |  Data | Status/Control |
+| ---- | ------ | ----: | -------------: |
+| A    | SIO0   | `40H` |          `41H` |
+| B    | SIO1   | `42H` |          `43H` |
 
-VT100DG.COM - VT100 terminal emulation test with limited DEC Special Graphics. Using the new Character ROM (2732 Eprom)
+## Kermit for the Bondwell 12/14
 
-Now created a new character ROM that includes the DEC Special Graphics character set for slightly better VT100 compatibility. I’m also adding support for inverse characters in the terminal code. 
-Double-height and double-width characters will not be possible without hardware modifications, so they will not be implemented. Underlining and bold text will also not be supported because of the current hardware and character ROM limitations.
-----------------------------------
+A Bondwell-compatible version of Kermit is also under development.
 
+The current `KERMBW.COM` is experimental and still quite buggy.
+
+Current limitations include:
+
+* VT52 terminal emulation only
+* Fixed 9600 baud rate
+* 8 data bits
+* No parity
+
+## Standalone VT100 Terminal
+
+The repository also contains experimental standalone VT100 terminal programs.
+
+### VT100C.COM
+
+Standalone VT100 terminal using SIO0.
+
+Serial settings:
+
+* 9600 baud
+* 8 data bits
+* No parity
+* 1 stop bit
+
+### VT100DG.COM
+
+Experimental VT100 terminal emulator with limited DEC Special Graphics support.
+
+This version is intended for use with the new 2732 character ROM image.
+
+## Enhanced Character ROM
+
+A new character ROM has been created that includes the DEC Special Graphics character set for improved VT100 compatibility.
+
+The terminal code is also being updated to support inverse characters.
+
+Because of the limitations of the Bondwell video hardware and character ROM system, the following features will not be implemented:
+
+* Double-height characters
+* Double-width characters
+* Underlined text
+* Bold text
+
+Many other VT100 features will also remain unsupported because they would require hardware modifications or more advanced video attribute support.
+
+This software should therefore be considered a limited VT100-compatible terminal implementation rather than a complete VT100 emulator.
+
+This version uses clearer headings, consistent program names, a serial-port table, and GitHub-friendly Markdown formatting.
