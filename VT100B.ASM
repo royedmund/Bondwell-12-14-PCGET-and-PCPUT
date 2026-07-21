@@ -1,6 +1,57 @@
-; VT100A - Bondwell 12/14 VT100/ANSI terminal with DEC Special Graphics
-; Includes translation of the four Bondwell cursor keys to VT100 ESC [ A/B/C/D.
-; Unsupported VT100 hardware-only functions are consumed and suppressed.
+;===============================================================================
+; VT100B - Bondwell 12/14 Limited VT100/ANSI Terminal
+;===============================================================================
+;
+; PURPOSE
+; -------
+; VT100B turns a Bondwell 12 or Bondwell 14 running CP/M into a basic
+; VT100-compatible serial terminal. It communicates through SIO channel A
+; at I/O ports 40H/41H and writes characters directly to Bondwell video RAM.
+;
+; DESIGN NOTES
+; ------------
+; The source is organised in the traditional CP/M/Kermit-80 style:
+;
+;   1. Hardware and operating-system definitions
+;   2. Program entry and main polling loop
+;   3. Local keyboard and command-prefix handling
+;   4. Z80 SIO initialisation, receive and transmit routines
+;   5. VT100 escape-sequence state machine
+;   6. Cursor, erase, scrolling and character-output routines
+;   7. Program variables, response strings and stack storage
+;
+; The layout and comments are inspired by the modular, hardware-oriented
+; organisation used by the original CP/M Kermit-80 source. No executable
+; behaviour has been changed while documenting this file.
+;
+; LOCAL COMMAND PREFIX
+; --------------------
+;   Ctrl-] C        Exit to CP/M
+;   Ctrl-] ?        Display local help
+;   Ctrl-] X        Send a literal Ctrl-X (useful for Nano)
+;   Ctrl-] Ctrl-]   Send a literal ESC byte
+;
+; BONDWELL CURSOR KEY CODES
+; -------------------------
+;   Up    05H       Down  18H
+;   Right 04H       Left  13H
+;
+; These CP/M/WordStar-style keyboard codes are translated to either
+; ESC [ A/B/C/D or ESC O A/B/C/D, according to VT100 cursor-key mode.
+;
+; HARDWARE SUMMARY
+; ----------------
+;   SIO channel A data       40H
+;   SIO channel A status     41H
+;   Video RAM base           F800H
+;   6845 CRTC index/data     10H/11H
+;   Display geometry         80 columns x 25 rows
+;
+;===============================================================================
+
+;===============================================================================
+; CP/M, HARDWARE AND TERMINAL CONSTANTS
+;===============================================================================
         ORG 0x0100
 BDOS EQU 0x0005
 BDOS_DIRIO EQU 0x06
@@ -32,58 +83,42 @@ STATE_HASH EQU 5
 STATE_BARE_CSI EQU 6
 CHARSET_ASCII EQU 0
 CHARSET_DEC EQU 1
+
+;===============================================================================
+; PROGRAM ENTRY AND MAIN SERVICE LOOP
+;===============================================================================
+;
+; CP/M loads a transient program at 0100H. The program installs its own stack,
+; initialises the Z80 SIO, resets the emulated terminal state and then repeatedly
+; services received serial data, the local keyboard and the hardware cursor.
+;
+; Initialise private stack, serial hardware and terminal state.
 START:
  LD SP,STACK_TOP
- CALL TERM_RESET
- CALL SHOW_STARTUP_TITLE
- CALL WAIT_START_KEY
  CALL SIO_INIT
  CALL TERM_RESET
- LD DE,BANNER
+
+ ; Display the local command keys once at startup. Terminal operation starts
+ ; immediately afterwards; no keypress is required.
+ LD DE,STARTUP_TEXT
  CALL PRINT_STRING
+
+; Cooperative polling loop. No interrupts are used.
 MAIN_LOOP:
  CALL SERIAL_POLL
  CALL KEYBOARD_POLL
  CALL UPDATE_HW_CURSOR
  JP MAIN_LOOP
 
-; Display the embedded 80x25 VT100/DEC Special Graphics title locally.
-; SIO0 is not initialised until the user presses a key, so the remote session
-; cannot disturb the launch screen.
-SHOW_STARTUP_TITLE:
- LD HL,STARTUP_TITLE
- LD BC,STARTUP_TITLE_END-STARTUP_TITLE
-SHOW_TITLE_LOOP:
- LD A,(HL)
- INC HL
- PUSH BC
- PUSH HL
- CALL VT_INPUT
- CALL UPDATE_HW_CURSOR
- CALL TITLE_DELAY
- POP HL
- POP BC
- DEC BC
- LD A,B
- OR C
- JP NZ,SHOW_TITLE_LOOP
- RET
-
-TITLE_DELAY:
- PUSH BC
- LD BC,0120H
-TITLE_DELAY_LOOP:
- DEC BC
- LD A,B
- OR C
- JP NZ,TITLE_DELAY_LOOP
- POP BC
- RET
-
-WAIT_START_KEY:
- CALL KEY_GET
- JP Z,WAIT_START_KEY
- RET
+;===============================================================================
+; LOCAL KEYBOARD INPUT AND COMMAND-PREFIX PROCESSING
+;===============================================================================
+;
+; Keyboard input is obtained through CP/M BDOS function 6 in non-blocking mode.
+; A zero result means no key is waiting. Ctrl-] is intercepted locally and makes
+; the following key a terminal command rather than a byte sent to the host.
+;
+; Return A=0 when no CP/M console key is available.
 KEY_GET:
  PUSH BC
  PUSH DE
@@ -94,6 +129,7 @@ KEY_GET:
  POP BC
  OR A
  RET
+; Process one local key, including the Ctrl-] prefix.
 KEYBOARD_POLL:
  CALL KEY_GET
  RET Z
@@ -107,6 +143,7 @@ KEYBOARD_POLL:
  LD A,1
  LD (LOCAL_ESC),A
  RET
+; Decode the character following the local Ctrl-] prefix.
 KEY_AFTER_ESCAPE:
  XOR A
  LD (LOCAL_ESC),A
@@ -116,12 +153,19 @@ KEY_AFTER_ESCAPE:
  JP Z,EXIT_TO_CPM
  CP 63
  JP Z,SHOW_HELP
+ CP 88
+ JP Z,SEND_CTRL_X
  LD A,B
  CP ESCAPE_CHAR
  RET NZ
  ; Ctrl-] Ctrl-] sends a literal ESC to the remote host.
  LD A,ESC
  JP SERIAL_SEND
+; Send raw 18H so Nano can receive its normal exit command.
+SEND_CTRL_X:
+ LD A,18H
+ JP SERIAL_SEND
+; Normal keyboard path before cursor-key translation.
 KEY_SEND:
  ; Normalise DEL from the Bondwell BIOS to Ctrl-H/BS.  This makes both
  ; the Backspace key and Ctrl-H send a conventional 08H backspace.
@@ -134,13 +178,25 @@ KEY_SEND_NOT_DEL:
  ; Up=05H, Down=18H, Right=04H, Left=13H.
  ; Translate them into VT100 cursor-key sequences.
  JP ARROW_KEY_SEND
+; Display local command help through CP/M BDOS.
 SHOW_HELP:
  LD DE,HELP_TEXT
  JP PRINT_STRING
+; Print a closing message and warm-boot CP/M through address 0000H.
 EXIT_TO_CPM:
  LD DE,EXIT_TEXT
  CALL PRINT_STRING
  JP 0
+
+;===============================================================================
+; Z80 SIO CHANNEL-A DRIVER
+;===============================================================================
+;
+; SIO channel A is programmed for the Bondwell serial port. Receive polling
+; drains all currently available bytes before returning to slower BDOS and CRTC
+; work. This reduces receive overruns during dense ANSI screen updates.
+;
+; Write the precomputed channel-A setup bytes to the SIO control port.
 SIO_INIT:
  LD HL,SIO_INIT_TABLE
  LD B,SIO_INIT_LEN
@@ -153,22 +209,26 @@ SIO_INIT_LOOP:
 SIO_INIT_TABLE:
  DB 0x18,0x18,0x04,0x44,0x01,0x00,0x03,0xC1,0x05,0xEA
 SIO_INIT_LEN EQU $-SIO_INIT_TABLE
+; Consume every byte currently waiting in the SIO receiver.
 SERIAL_POLL:
- ; Drain a burst of received characters before returning to keyboard polling.
- ; Reading only one byte per main-loop pass allowed the Z80 SIO receive FIFO
- ; to overrun during ANSI sequences such as ESC [ K, occasionally dropping
- ; the leading ESC and displaying the remaining [K as ordinary text.
- LD B,32
+ ; Drain all available serial input before calling BDOS or updating the cursor.
+ ; Nano sends dense groups of VT100 sequences. Returning after only 32 bytes
+ ; allowed the three-byte SIO FIFO to overrun while the main loop performed
+ ; slower keyboard and hardware-cursor work, often losing the leading ESC.
 SERIAL_DRAIN_LOOP:
  IN A,(SIO_STAT)
  AND RX_MASK
- RET Z
+ JP Z,SERIAL_DRAIN_DONE
  IN A,(SIO_DATA)
- PUSH BC
  CALL VT_INPUT
- POP BC
- DJNZ SERIAL_DRAIN_LOOP
+ JP SERIAL_DRAIN_LOOP
+SERIAL_DRAIN_DONE:
+ ; Z80 SIO WR0 command 30H resets parity/overrun/framing error latches.
+ ; This also restores the register pointer to WR0 for the next status read.
+ LD A,30H
+ OUT (SIO_STAT),A
  RET
+; Send one byte with a finite TX-ready timeout.
 SERIAL_SEND:
  ; Never wait forever for the SIO transmitter.  A missing or unexpected
  ; TX-ready indication previously locked the whole terminal, preventing
@@ -193,6 +253,23 @@ SERIAL_TX_READY:
  POP AF
  OUT (SIO_DATA),A
  RET
+
+;===============================================================================
+; VT100 INPUT PARSER
+;===============================================================================
+;
+; Each received serial byte is dispatched according to PARSER_STATE.
+;
+;   STATE_NORMAL    Ordinary text and C0 control characters
+;   STATE_ESC       Character immediately following ESC
+;   STATE_CSI       ANSI Control Sequence Introducer parameters
+;   STATE_G0/G1     Character-set designator following ESC ( or ESC )
+;   STATE_HASH      ESC # line-size/alignment sequence
+;   STATE_BARE_CSI  Recovery for a missing ESC before [
+;
+; CAN and SUB cancel a partially received escape sequence.
+;
+; Top-level state-machine dispatcher for one received byte.
 VT_INPUT:
  ; CAN and SUB cancel any in-progress escape sequence.
  CP 0x18
@@ -221,6 +298,7 @@ VT_CANCEL:
  RET
 VT_NORMAL_DISPATCH:
  POP AF
+; Handle printable characters and single-byte C0 controls.
 VT_NORMAL:
  CP ESC
  JP Z,VT_BEGIN_ESC
@@ -253,6 +331,15 @@ VT_NORMAL:
 ; Recovery for a CSI sequence whose leading ESC was lost because of a serial
 ; receive overrun.  The common readline backspace echo ends with ESC [ K.
 ; If only [ K arrives, treat it as EL 0 rather than displaying literal [K.
+
+;-------------------------------------------------------------------------------
+; Lost-ESC recovery
+;-------------------------------------------------------------------------------
+;
+; Some serial overruns observed during command-line editing lost the ESC byte
+; from ESC [ K. Holding a bare '[' for one byte lets the parser recognise [K as
+; erase-to-end-of-line while still displaying a normal '[' in ordinary text.
+;
 VT_BEGIN_BARE_CSI:
  LD A,STATE_BARE_CSI
  LD (PARSER_STATE),A
@@ -273,6 +360,10 @@ VT_BARE_CSI_DISPATCH:
  POP AF
  JP VT_NORMAL
 
+
+;-------------------------------------------------------------------------------
+; ESC sequence dispatcher
+;-------------------------------------------------------------------------------
 VT_BEGIN_ESC:
  LD A,STATE_ESC
  LD (PARSER_STATE),A
@@ -283,6 +374,7 @@ VT_BELL:
  JP BDOS
 VT_ESC_DISPATCH:
  POP AF
+; Decode the byte following ESC.
 VT_ESC:
  CP 40
  JP Z,BEGIN_G0
@@ -380,6 +472,15 @@ SELECT_G1:
  LD A,1
  LD (GL_SELECT),A
  RET
+
+;-------------------------------------------------------------------------------
+; ANSI CSI parser
+;-------------------------------------------------------------------------------
+;
+; This compact parser stores two numeric parameters separated by ';'. Private
+; DEC modes are identified by '?' and recorded in PRIVATE_FLAG.
+;
+; Enter CSI state and clear parameter storage.
 BEGIN_CSI:
  LD A,STATE_CSI
  LD (PARSER_STATE),A
@@ -391,6 +492,7 @@ BEGIN_CSI:
  RET
 VT_CSI_DISPATCH:
  POP AF
+; Accumulate digits, separators and DEC private-mode markers.
 VT_CSI:
  CP ESC
  JP Z,VT_BEGIN_ESC
@@ -424,6 +526,7 @@ CSI_NOT_DIGIT:
  LD A,1
  LD (PARAM_INDEX),A
  RET
+; Dispatch the final CSI command character.
 CSI_COMMAND:
  PUSH AF
  XOR A
@@ -473,6 +576,10 @@ CSI_COMMAND:
  JP Z,CSI_MODE_RESET
  ; Other modes, scrolling regions, tabs, LEDs and tests are safely suppressed.
  RET
+
+;-------------------------------------------------------------------------------
+; CSI command implementations
+;-------------------------------------------------------------------------------
 MUL10_ADD_B:
  LD C,A
  ADD A,A
@@ -714,6 +821,16 @@ SDS10:
  LD A,D
  ADD A,48
  JP SERIAL_SEND
+
+;===============================================================================
+; TERMINAL RESET, CHARACTER OUTPUT AND CHARACTER-SET MAPPING
+;===============================================================================
+;
+; TERM_RESET restores default parser, cursor, attribute and G0/G1 state.
+; PUT_CHAR maps DEC Special Graphics when selected, applies inverse video by
+; setting bit 7, writes directly to video RAM and advances the logical cursor.
+;
+; Restore VT100 defaults and clear the display.
 TERM_RESET:
  XOR A
  LD (PARSER_STATE),A
@@ -733,6 +850,7 @@ TERM_RESET:
  LD (G1_CHARSET),A
  LD (SAVED_G1_CHARSET),A
  JP CLEAR_SCREEN
+; Render one printable character at the current position.
 PUT_CHAR:
  CALL MAP_GL_CHARACTER
  PUSH AF
@@ -747,6 +865,7 @@ PUT_CHAR:
 PUT_STORE:
  LD (HL),A
  JP CURSOR_RIGHT_WRAP
+; Map 60H-7EH through the selected DEC graphics set.
 MAP_GL_CHARACTER:
  LD B,A
  LD A,(GL_SELECT)
@@ -766,6 +885,19 @@ MAP_TEST:
  RET NC
  SUB 0x60
  RET
+
+;===============================================================================
+; CURSOR POSITIONING AND BASIC CONTROL ACTIONS
+;===============================================================================
+;
+; CURSOR_ADDRESS calculates:
+;
+;       VIDEO_BASE + (row * 80) + column
+;
+; The multiplication by 80 is performed using shifts and additions so no
+; multiply instruction or large lookup table is required.
+;
+; Return HL pointing at the current video-memory cell.
 CURSOR_ADDRESS:
  LD A,(CUR_ROW)
  LD L,A
@@ -829,6 +961,7 @@ CARRIAGE_RETURN:
  XOR A
  LD (CUR_COL),A
  RET
+; Move down one row or scroll when already on the last row.
 LINE_FEED:
  LD A,(CUR_ROW)
  CP ROWS-1
@@ -862,6 +995,11 @@ TAB_FORWARD:
 TAB_STORE:
  LD (CUR_COL),A
  RET
+
+;===============================================================================
+; SAVED CURSOR, ERASE AND SCROLL OPERATIONS
+;===============================================================================
+; Save cursor, attribute and G0/G1 selection state.
 SAVE_CURSOR:
  XOR A
  LD (PARSER_STATE),A
@@ -878,6 +1016,7 @@ SAVE_CURSOR:
  LD A,(GL_SELECT)
  LD (SAVED_GL_SELECT),A
  RET
+; Restore cursor, attribute and G0/G1 selection state.
 RESTORE_CURSOR:
  XOR A
  LD (PARSER_STATE),A
@@ -894,6 +1033,7 @@ RESTORE_CURSOR:
  LD A,(SAVED_GL_SELECT)
  LD (GL_SELECT),A
  RET
+; Fill all 2,000 character cells with spaces.
 CLEAR_SCREEN:
  LD HL,VIDEO_BASE
  LD DE,VIDEO_BASE+1
@@ -977,6 +1117,7 @@ CTSS:
  OR C
  JP NZ,CTSS
  RET
+; Move rows 2-25 upward and blank the new bottom row.
 SCROLL_UP:
  LD HL,VIDEO_BASE+COLS
  LD DE,VIDEO_BASE
@@ -991,6 +1132,7 @@ SUC:
  LD A,ROWS-1
  LD (CUR_ROW),A
  RET
+; Move rows 1-24 downward and blank the new top row.
 SCROLL_DOWN:
  LD HL,VIDEO_BASE+SCREEN_SIZE-COLS-1
  LD DE,VIDEO_BASE+SCREEN_SIZE-1
@@ -1005,6 +1147,16 @@ SDC:
  XOR A
  LD (CUR_ROW),A
  RET
+
+;===============================================================================
+; 6845 HARDWARE CURSOR AND CP/M STRING OUTPUT
+;===============================================================================
+;
+; The Bondwell display cursor is maintained separately from the character data.
+; Registers 14 and 15 of the 6845-compatible CRTC receive the current character
+; offset within the 2,000-byte screen.
+;
+; Program CRTC cursor registers from CUR_ROW/CUR_COL.
 UPDATE_HW_CURSOR:
  PUSH AF
  PUSH BC
@@ -1039,12 +1191,17 @@ UPDATE_HW_CURSOR:
  POP BC
  POP AF
  RET
+; Print a '$'-terminated string using BDOS function 9.
 PRINT_STRING:
  PUSH BC
  LD C,BDOS_PRINT
  CALL BDOS
  POP BC
  RET
+
+;===============================================================================
+; WORKING STORAGE AND FIXED RESPONSE STRINGS
+;===============================================================================
 PARSER_STATE: DB 0
 PARAM1: DB 0
 PARAM2: DB 0
@@ -1066,13 +1223,31 @@ LOCAL_ESC: DB 0
 CURSOR_APP_MODE: DB 0
 IDENT_RESPONSE: DB ESC,91,63,49,59,48,99,0
 STATUS_OK: DB ESC,91,48,110,0
-BANNER: DB 13,10,"Bondwell 12/14 VT100 ANSI terminal",13,10,"SIO0 40H/41H. Ctrl-] C exits.",13,10,36
-HELP_TEXT: DB 13,10,"[Ctrl-] C=close, Ctrl-] ?=help, Ctrl-] Ctrl-]=send ESC]",13,10,36
+
+; Brief instructions displayed once when VT100B starts.
+STARTUP_TEXT:
+ DB 13,10,"VT100B local commands:",13,10
+ DB "  Ctrl-] C        Exit to CP/M",13,10
+ DB "  Ctrl-] Ctrl-]  Send ESC to the remote system",13,10
+ DB "  Ctrl-] X        Send Ctrl-X to Nano",13,10,13,10,36
+
+HELP_TEXT: DB 13,10,"[Ctrl-] C=close, Ctrl-] ?=help]",13,10
+ DB "[Ctrl-] X=send Ctrl-X, Ctrl-] Ctrl-]=send ESC]",13,10,36
 EXIT_TEXT: DB 13,10,"[Connection closed, back at CP/M]",13,10,36
 
 ; Local Bondwell cursor-key translation.  Ordinary Ctrl-D/E/S/X input is
 ; intentionally translated too, because the Bondwell BIOS presents the
 ; physical cursor keys using those same console character codes.
+
+;===============================================================================
+; BONDWELL CURSOR-KEY TRANSLATION
+;===============================================================================
+;
+; The Bondwell BIOS returns CP/M/WordStar control codes for the four physical
+; cursor keys. VT100B converts these to ANSI cursor sequences. In DEC private
+; application-cursor mode the second byte is 'O'; otherwise it is '['.
+;
+; Translate Bondwell cursor codes or send an ordinary key.
 ARROW_KEY_SEND:
  LD A,B
  CP 05H
@@ -1096,6 +1271,7 @@ ARROW_RIGHT:
  JP SEND_CURSOR_SEQUENCE
 ARROW_LEFT:
  LD C,'D'
+; Emit ESC plus '[' or 'O', followed by A/B/C/D.
 SEND_CURSOR_SEQUENCE:
  LD A,ESC
  CALL SERIAL_SEND
@@ -1109,223 +1285,18 @@ SEND_CURSOR_PREFIX:
  LD A,C
  JP SERIAL_SEND
 
-
-; Embedded launch title with Press Any Key to Continue prompt.
-STARTUP_TITLE:
- DB 27,91,50,74,27,91,72,27,40,48,27,91,49,59,49,72
- DB 108,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,107
- DB 27,91,50,59,49,72,120,27,91,50,59,56,48,72,120,27
- DB 91,51,59,49,72,120,27,91,51,59,56,48,72,120,27,91
- DB 52,59,49,72,120,27,91,52,59,56,48,72,120,27,91,53
- DB 59,49,72,120,27,91,53,59,56,48,72,120,27,91,54,59
- DB 49,72,120,27,91,54,59,56,48,72,120,27,91,55,59,49
- DB 72,120,27,91,55,59,56,48,72,120,27,91,56,59,49,72
- DB 120,27,91,56,59,56,48,72,120,27,91,57,59,49,72,120
- DB 27,91,57,59,56,48,72,120,27,91,49,48,59,49,72,120
- DB 27,91,49,48,59,56,48,72,120,27,91,49,49,59,49,72
- DB 120,27,91,49,49,59,56,48,72,120,27,91,49,50,59,49
- DB 72,120,27,91,49,50,59,56,48,72,120,27,91,49,51,59
- DB 49,72,120,27,91,49,51,59,56,48,72,120,27,91,49,52
- DB 59,49,72,120,27,91,49,52,59,56,48,72,120,27,91,49
- DB 53,59,49,72,120,27,91,49,53,59,56,48,72,120,27,91
- DB 49,54,59,49,72,120,27,91,49,54,59,56,48,72,120,27
- DB 91,49,55,59,49,72,120,27,91,49,55,59,56,48,72,120
- DB 27,91,49,56,59,49,72,120,27,91,49,56,59,56,48,72
- DB 120,27,91,49,57,59,49,72,120,27,91,49,57,59,56,48
- DB 72,120,27,91,50,48,59,49,72,120,27,91,50,48,59,56
- DB 48,72,120,27,91,50,49,59,49,72,120,27,91,50,49,59
- DB 56,48,72,120,27,91,50,50,59,49,72,120,27,91,50,50
- DB 59,56,48,72,120,27,91,50,51,59,49,72,120,27,91,50
- DB 51,59,56,48,72,120,27,91,50,52,59,49,72,120,27,91
- DB 50,52,59,56,48,72,120,27,91,50,53,59,49,72,109,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,106,27,91
- DB 54,59,51,72,116,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,117
- DB 27,91,49,56,59,51,72,116,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,113,113,113,113,113,113,113,113,113,113,113,113,113,113
- DB 113,113,117,27,91,51,59,52,72,97,97,97,97,97,97,27
- DB 91,51,59,55,49,72,97,97,97,97,97,97,27,91,52,59
- DB 52,72,97,97,97,97,97,97,27,91,52,59,55,49,72,97
- DB 97,97,97,97,97,27,91,53,59,52,72,97,97,97,97,97
- DB 97,27,91,53,59,55,49,72,97,97,97,97,97,97,27,91
- DB 49,57,59,52,72,97,97,97,97,97,97,27,91,49,57,59
- DB 55,49,72,97,97,97,97,97,97,27,91,50,48,59,52,72
- DB 97,97,97,97,97,97,27,91,50,48,59,55,49,72,97,97
- DB 97,97,97,97,27,91,50,49,59,52,72,97,97,97,97,97
- DB 97,27,91,50,49,59,55,49,72,97,97,97,97,97,97,27
- DB 91,50,50,59,52,72,97,97,97,97,97,97,27,91,50,50
- DB 59,55,49,72,97,97,97,97,97,97,27,91,50,51,59,52
- DB 72,97,97,97,97,97,97,27,91,50,51,59,55,49,72,97
- DB 97,97,97,97,97,27,40,66,27,91,56,59,49,57,72,66
- DB 66,66,66,32,32,32,79,79,79,32,32,32,78,32,32,32
- DB 78,32,68,68,68,68,32,32,87,32,32,32,87,32,69,69
- DB 69,69,69,32,76,32,32,32,32,32,76,27,91,57,59,49
- DB 57,72,66,32,32,32,66,32,79,32,32,32,79,32,32,78
- DB 78,32,32,78,32,68,32,32,32,68,32,87,32,32,32,87
- DB 32,69,32,32,32,32,32,76,32,32,32,32,32,76,27,91
- DB 49,48,59,49,57,72,66,66,66,66,32,32,79,32,32,32
- DB 79,32,32,78,32,78,32,78,32,68,32,32,32,68,32,87
- DB 32,87,32,87,32,69,69,69,69,32,32,76,32,32,32,32
- DB 32,76,27,91,49,49,59,49,57,72,66,32,32,32,66,32
- DB 79,32,32,32,79,32,32,78,32,32,78,78,32,68,32,32
- DB 32,68,32,87,87,32,87,87,32,69,32,32,32,32,32,76
- DB 32,32,32,32,32,76,27,91,49,50,59,49,55,72,66,66
- DB 66,66,32,32,32,79,79,79,32,32,32,78,32,32,32,78
- DB 32,68,68,68,68,32,32,87,32,32,32,87,32,69,69,69
- DB 69,69,32,76,76,76,76,76,32,76,76,76,76,76,27,91
- DB 49,52,59,51,56,72,49,50,47,49,52,27,91,49,54,59
- DB 51,49,72,67,80,47,77,32,86,84,49,48,48,32,84,101
- DB 114,109,105,110,97,108,27,91,50,51,59,49,55,72,66,111
- DB 110,100,119,101,108,108,32,49,50,47,49,52,32,76,105,109
- DB 105,116,101,100,32,86,84,49,48,48,32,67,111,109,112,97
- DB 116,105,98,105,108,105,116,121,32,68,101,109,111,27,91,50
- DB 48,59,56,72,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,27,40,48,27,91,50,48,59,49,50,72
- DB 97,97,97,27,40,66,27,91,50,49,59,51,53,72,86,84
- DB 49,48,48,32,84,69,83,84,32,124,27,91,55,109,27,91
- DB 49,54,59,51,49,72,67,80,47,77,32,86,84,49,48,48
- DB 32,84,101,114,109,105,110,97,108,27,91,50,55,109,27,91
- DB 50,48,59,56,72,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,27,40,48,27,91,50,48,59,50,48
- DB 72,97,97,97,27,40,66,27,91,50,49,59,51,53,72,86
- DB 84,49,48,48,32,84,69,83,84,32,47,27,91,49,54,59
- DB 51,49,72,67,80,47,77,32,86,84,49,48,48,32,84,101
- DB 114,109,105,110,97,108,27,91,50,48,59,56,72,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,27,40
- DB 48,27,91,50,48,59,50,56,72,97,97,97,27,40,66,27
- DB 91,50,49,59,51,53,72,86,84,49,48,48,32,84,69,83
- DB 84,32,45,27,91,55,109,27,91,49,54,59,51,49,72,67
- DB 80,47,77,32,86,84,49,48,48,32,84,101,114,109,105,110
- DB 97,108,27,91,50,55,109,27,91,50,48,59,56,72,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,27
- DB 40,48,27,91,50,48,59,51,54,72,97,97,97,27,40,66
- DB 27,91,50,49,59,51,53,72,86,84,49,48,48,32,84,69
- DB 83,84,32,92,27,91,49,54,59,51,49,72,67,80,47,77
- DB 32,86,84,49,48,48,32,84,101,114,109,105,110,97,108,27
- DB 91,50,48,59,56,72,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,27,40,48,27,91,50,48,59,52
- DB 52,72,97,97,97,27,40,66,27,91,50,49,59,51,53,72
- DB 86,84,49,48,48,32,84,69,83,84,32,124,27,91,55,109
- DB 27,91,49,54,59,51,49,72,67,80,47,77,32,86,84,49
- DB 48,48,32,84,101,114,109,105,110,97,108,27,91,50,55,109
- DB 27,91,50,48,59,56,72,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,27,40,48,27,91,50,48,59
- DB 53,50,72,97,97,97,27,40,66,27,91,50,49,59,51,53
- DB 72,86,84,49,48,48,32,84,69,83,84,32,47,27,91,49
- DB 54,59,51,49,72,67,80,47,77,32,86,84,49,48,48,32
- DB 84,101,114,109,105,110,97,108,27,91,50,48,59,56,72,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 27,40,48,27,91,50,48,59,54,48,72,97,97,97,27,40
- DB 66,27,91,50,49,59,51,53,72,86,84,49,48,48,32,84
- DB 69,83,84,32,45,27,91,55,109,27,91,49,54,59,51,49
- DB 72,67,80,47,77,32,86,84,49,48,48,32,84,101,114,109
- DB 105,110,97,108,27,91,50,55,109,27,91,50,48,59,56,72
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,27,40,48,27,91,50,48,59,54,56,72,97,97,97,27
- DB 40,66,27,91,50,49,59,51,53,72,86,84,49,48,48,32
- DB 84,69,83,84,32,92,27,91,49,54,59,51,49,72,67,80
- DB 47,77,32,86,84,49,48,48,32,84,101,114,109,105,110,97
- DB 108,27,91,50,48,59,56,72,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,27,40,48,27,91,50,48
- DB 59,54,48,72,97,97,97,27,40,66,27,91,50,49,59,51
- DB 53,72,86,84,49,48,48,32,84,69,83,84,32,124,27,91
- DB 55,109,27,91,49,54,59,51,49,72,67,80,47,77,32,86
- DB 84,49,48,48,32,84,101,114,109,105,110,97,108,27,91,50
- DB 55,109,27,91,50,48,59,56,72,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,27,40,48,27,91,50
- DB 48,59,53,50,72,97,97,97,27,40,66,27,91,50,49,59
- DB 51,53,72,86,84,49,48,48,32,84,69,83,84,32,47,27
- DB 91,49,54,59,51,49,72,67,80,47,77,32,86,84,49,48
- DB 48,32,84,101,114,109,105,110,97,108,27,91,50,48,59,56
- DB 72,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,27,40,48,27,91,50,48,59,52,52,72,97,97,97
- DB 27,40,66,27,91,50,49,59,51,53,72,86,84,49,48,48
- DB 32,84,69,83,84,32,45,27,91,55,109,27,91,49,54,59
- DB 51,49,72,67,80,47,77,32,86,84,49,48,48,32,84,101
- DB 114,109,105,110,97,108,27,91,50,55,109,27,91,50,48,59
- DB 56,72,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,27,40,48,27,91,50,48,59,51,54,72,97,97
- DB 97,27,40,66,27,91,50,49,59,51,53,72,86,84,49,48
- DB 48,32,84,69,83,84,32,92,27,91,49,54,59,51,49,72
- DB 67,80,47,77,32,86,84,49,48,48,32,84,101,114,109,105
- DB 110,97,108,27,91,50,48,59,56,72,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,27,40,48,27,91
- DB 50,48,59,50,56,72,97,97,97,27,40,66,27,91,50,49
- DB 59,51,53,72,86,84,49,48,48,32,84,69,83,84,32,124
- DB 27,91,55,109,27,91,49,54,59,51,49,72,67,80,47,77
- DB 32,86,84,49,48,48,32,84,101,114,109,105,110,97,108,27
- DB 91,50,55,109,27,91,50,48,59,56,72,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32
- DB 32,32,32,32,32,32,32,32,32,32,32,32,27,40,48,27
- DB 91,50,48,59,50,48,72,97,97,97,27,40,66,27,91,50
- DB 49,59,51,53,72,86,84,49,48,48,32,84,69,83,84,32
- DB 47,27,91,49,54,59,51,49,72,67,80,47,77,32,86,84
- DB 49,48,48,32,84,101,114,109,105,110,97,108,27,91,50,48
- DB 59,51,54,72,91,32,82,69,65,68,89,32,93,27,91,50
- DB 49,59,50,56,72,80,114,101,115,115,32,65,110,121,32,75
- DB 101,121,32,116,111,32,67,111,110,116,105,110,117,101,27,91
- DB 50,53,59,49,72,27,40,66
-STARTUP_TITLE_END:
-
 ; Dedicated stack storage. The stack grows downward from STACK_TOP into this
 ; reserved area. In earlier builds STACK_TOP immediately followed the arrow
 ; routines while the DS 256 block was before them, so PUSH instructions
 ; overwrote the cursor-key code and caused freezes when an arrow was pressed.
+
+;===============================================================================
+; PRIVATE STACK
+;===============================================================================
+;
+; The Z80 stack grows downward from STACK_TOP into this reserved block.
+; Keeping the stack separate prevents PUSH/CALL activity from overwriting code.
+;
 STACK_AREA:
  DS 256
 STACK_TOP:
