@@ -1,5 +1,3 @@
-Here is a polished version for your GitHub `README.md`:
-
 # XMODEM Transfer Utilities for the Bondwell 12/14
 
 XMODEM file transfer utilities for the Bondwell 12 and Bondwell 14 Z80 computers running CP/M 2.2 or CP/M 3.0 Plus.
@@ -8,7 +6,7 @@ These utilities allow files to be transferred between a Bondwell CP/M system and
 
 `PCGET` and `PCPUT` are based on the work of DeRamp:
 
-[https://deramp.com](https://deramp.com)
+https://deramp.com
 
 They were adapted from the Kaypro 10 versions for use with the Bondwell 12/14 serial ports.
 
@@ -23,7 +21,7 @@ They were adapted from the Kaypro 10 versions for use with the Bondwell 12/14 se
 
 A Bondwell-compatible version of Kermit is also under development.
 
-The current `KERMBW.COM` is experimental and still quite buggy.
+The current `KERMBW.COM` release is experimental and still quite buggy.
 
 Current limitations include:
 
@@ -34,7 +32,7 @@ Current limitations include:
 
 ## Standalone VT100 Terminal Emulation
 
-The repository also contains experimental standalone VT100 terminal programs.
+This repository also contains experimental standalone VT100 terminal programs.
 
 ### VT100C.COM
 
@@ -59,53 +57,78 @@ A new character ROM has been created that includes the DEC Special Graphics char
 
 The terminal code is also being updated to support inverse characters.
 
-Because of the limitations of the Bondwell video hardware and character ROM system, the following features will not be implemented:
+Because of limitations in the Bondwell video hardware and character ROM system, the following features will not be implemented:
 
 * Double-height characters
 * Double-width characters
 * Underlined text
 * Bold text
 
-Many other VT100 features will also remain unsupported because they would require hardware modifications or more advanced video attribute support.
+Many other VT100 features will remain unsupported because they would require hardware modifications or more advanced video attribute support.
 
 This software should therefore be considered a limited VT100-compatible terminal implementation rather than a complete VT100 emulator.
 
-----------------------------------------------
-## Demo release VT100B
-## VT100B Compatibility
+---
 
-VT100B provides limited VT100/ANSI terminal emulation for the Bondwell 12/14.
+# VT100B Demo Release
 
-### Supported
+`VT100B` provides limited VT100 and ANSI terminal emulation for the Bondwell 12/14.
+
+## Supported Features
 
 * 80-column text display
-* Cursor movement and direct cursor positioning
-* Screen and line erase functions
-* Scrolling and reverse index
+* Cursor movement
+* Direct cursor positioning
+* Screen erase functions
+* Line erase functions
+* Scrolling
+* Reverse index
 * Save and restore cursor position
 * Inverse video
 * DEC Special Graphics
-* G0/G1 character-set switching
-* Device status and cursor-position reports
-* Normal and application cursor-key modes
+* G0 and G1 character-set switching
+* Device status reports
+* Cursor-position reports
+* Normal cursor-key mode
+* Application cursor-key mode
 * Bondwell cursor-key translation
 * Local exit using `Ctrl-] C`
 
-### Limitations
+## Known Issues
 
-VT100B does not support:
+Some terminal applications, including Nano, may display control sequences as text. This issue is still being investigated.
 
-* Double-width or double-height text
-* Underline, bold, blink or colour
+`Ctrl+X` cannot currently be used to exit Nano because the Bondwell keyboard maps this control code to the down-arrow key.
+
+As a temporary workaround, use:
+
+```text
+Ctrl-] X
+```
+
+Backspace support has improved but may still be unreliable at the CP/M command line.
+
+## Unsupported Features
+
+`VT100B` does not support:
+
+* Double-width text
+* Double-height text
+* Underline
+* Bold
+* Blink
+* Colour
 * 132-column mode
 * Programmable tab stops
 * Scrolling regions
-* Insert/delete character or line operations
+* Insert-character operations
+* Delete-character operations
+* Insert-line operations
+* Delete-line operations
 * Numeric keypad emulation
 * Full VT52 mode
 * Complete VTTEST compatibility
 
-Unsupported sequences are generally consumed and ignored to reduce unwanted characters on screen.
+Unsupported escape sequences are generally consumed and ignored to reduce the number of unwanted control characters displayed on the screen.
 
-
-
+`VT100B` should be considered an experimental demo release rather than a complete VT100 terminal implementation.
