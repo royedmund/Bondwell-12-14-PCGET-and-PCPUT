@@ -70,6 +70,42 @@ Many other VT100 features will also remain unsupported because they would requir
 
 This software should therefore be considered a limited VT100-compatible terminal implementation rather than a complete VT100 emulator.
 
-TODO
-Add Bondwell Function keys and Cursor keys controls for the VT100 emulation.
+----------------------------------------------
+## Demo release VT100B
+## VT100B Compatibility
+
+VT100B provides limited VT100/ANSI terminal emulation for the Bondwell 12/14.
+
+### Supported
+
+* 80-column text display
+* Cursor movement and direct cursor positioning
+* Screen and line erase functions
+* Scrolling and reverse index
+* Save and restore cursor position
+* Inverse video
+* DEC Special Graphics
+* G0/G1 character-set switching
+* Device status and cursor-position reports
+* Normal and application cursor-key modes
+* Bondwell cursor-key translation
+* Local exit using `Ctrl-] C`
+
+### Limitations
+
+VT100B does not support:
+
+* Double-width or double-height text
+* Underline, bold, blink or colour
+* 132-column mode
+* Programmable tab stops
+* Scrolling regions
+* Insert/delete character or line operations
+* Numeric keypad emulation
+* Full VT52 mode
+* Complete VTTEST compatibility
+
+Unsupported sequences are generally consumed and ignored to reduce unwanted characters on screen.
+
+
 
