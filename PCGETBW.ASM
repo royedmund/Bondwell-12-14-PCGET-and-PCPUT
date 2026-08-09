@@ -1,8 +1,9 @@
 ;
 ;  Bondwell 12/14 Version. Assumes approximately 4MHz CPU
 ;
-;  PCPUT - This CP/M program sends a file from a CP/M system to a PC
-;  via a serial The file transfer uses the XMODEM protocol. 
+;  PCGET - This CP/M program receives a file from a PC via a serial 
+;  port and writes it to a file on the CP/M system. The file transfer uses
+;  the XMODEM protocol. 
 ;
 ;  Note this program is gutted from the Ward Christenson Modem program.
 ;
@@ -12,8 +13,6 @@
 ;	Ver	Date	   Desc
 ;   	---    --------    -----------------------------------------------
 ;	1.0    01/04/15	   Initial version
-;	1.1    10/16/15	   Set initial CRC flag state in software. Was
-;			   previously random from load.
 ;
 ;  Serial Port Equates
 
@@ -30,9 +29,7 @@ XMTRDY	EQU	4		;VALUE WHEN READY
 RCVMASK	EQU	1		;MASK TO ISOLATE RECEIVE READY BIT
 RCVRDY	EQU	1		;VALUE WHEN READY
 
-ERRLMT	EQU	5		;MAX ALLOWABLE ERRORS
-
-;DEFINE ASCII CHARACTERS USED
+;  Transfer related equates
 
 SOH	EQU	1
 EOT	EQU	4
@@ -42,7 +39,7 @@ CTRLC	EQU	3		;Control-C
 LF	EQU	10
 CR	EQU	13
 
-	org	100h
+	ORG	100H
 
 ;  Verify a file name was specified
 
@@ -54,20 +51,22 @@ CR	EQU	13
 	call	bdos
 	ret			;return to CPM
 
-; Switch to local stack. See if Bondwell Port B "B" specified
+;  Switch to local stack. See if Bondwell Port B "B" specified
 
 haveFn	LXI	H,0		;save CP/M stack, switch to local stack
 	DAD	SP		;HL=STACK FROM CP/M
 	SHLD	STACK		;..SAVE IT
 	LXI	SP,STACK	;SP=MY STACK
 	mvi	b,ADR		;default to Bondwell Port A
+	lxi	d,mSendA	;d->Bondwell Port A prompt
 	lda	PARAM2		;A=1st character of parameter 2
 	ani	5fh		;force upper case
 	cpi	'B'		;Bondwell Port B specified?
 	jnz	doXfer		;no, go do the transfer
 	mvi	b,BDR		;use Bondwell Port B
+	lxi	d,mSendB	;d->Bondwell Port B prompt
 	
-;  doXfer - Switch to local stack and do the transfer
+;  doXfer - Initialize then do the transfer
 
 doXfer	mov	a,b		;a=address of serial port to use
 	sta	rcvSDR		;modify IN instruction for data register
@@ -79,113 +78,156 @@ doXfer	mov	a,b		;a=address of serial port to use
 	nop			;Bondwell: preserve CP/M serial configuration
 	nop			;do not apply Kaypro SIO reset/format sequence
 	nop
-	xra	a		
-	sta	SECTNO		;initialize sector number to zero
-	CALL	OPEN$FILE	;OPEN THE FILE
-	lxi	d,mRcvA		;d->Bondwell Port A
-	lda	rcvSDR		;using Port A or Port B?
-	cpi	ADR		;compare to Port A data address
-	jz	usingPr		;using Port A
-	lxi	d,mRcvB		;otherwise, d->Bondwell Port B prompt
-usingPr	MVI	C,PRINT
-	CALL	BDOS		;print receive file prompt
+	xra	a
+	sta	SECTNO		;init sector number to zero
+	MVI	C,PRINT		;print the send message
+	CALL	BDOS		;PRINT ID MESSAGE
 
 ;  GOBBLE UP GARBAGE CHARS FROM THE LINE
 
 purge	MVI	B,1		;times out after 1 second if no data
 	CALL	RECV
-	jc	lineClr		;line is clear, go wait for initial NAK
+	jc	RECEIVE$FILE	;line is clear, go receive the file
 	cpi	ctrlc		;exit if abort requested
 	jz	abort
 	jmp	purge
-
-; WAIT FOR INITIAL NAK, THEN SEND THE FILE
-	
-lineClr	xra	a		;clear crc flag = checksum mode
-	sta	crcFlag
-WAITNAK	MVI	B,1		;TIMEOUT DELAY
-	CALL	RECV
-	JC	WAITNAK
-	cpi	ctrlc		;abort requested?
-	jz	abort
-	CPI	NAK		;NAK RECEIVED?
-	jz	SENDB		;yes, send file in checksum mode
-	cpi	'C'		;'C' for CRC mode received?
-	JNZ	WAITNAK		;no, keep waiting
-	sta	crcFlag		;set CRC flag non-zero = true
-				;fall through to start the send operation
 ;
-;*****************SEND A FILE***************
+;**************RECEIVE FILE****************
 ;
+RECEIVE$FILE:
+	CALL	ERASE$OLD$FILE
+	CALL	MAKE$NEW$FILE
+	MVI	A,NAK
+	CALL	SEND		;SEND NAK
 
-;READ SECTOR, SEND IT
-
-SENDB	CALL	READ$SECTOR
-	LDA	SECTNO		;INCR SECT NO.
-	INR	A
-	STA	SECTNO
-
-;SEND OR REPEAT SECTOR
-
-REPTB	MVI	A,SOH
-	CALL	SEND
-	LDA	SECTNO
-	CALL	SEND
-	LDA	SECTNO
-	CMA
-	CALL	SEND
-	lxi	h,0		;init crc to zero
-	shld	crc16
-	mov	c,h		;init checksum in c to zero
-	LXI	H,80H
-SENDC	MOV	A,M
-	CALL	SEND
-	call	calCrc		;update CRC
-	INX	H
-	MOV	A,H
-	CPI	1		;DONE WITH SECTOR?
-	JNZ	SENDC
-
-; Send checksum or CRC based on crcFlag
-
-	lda	crcFlag		;crc or checksum?
-	ora	a
-	jz	sndCsum		;flag clear = checksum
-	lda	crc16+1		;a=high byte of CRC
-	call	SEND		;send it
-	lda	crc16		;a=low byte of crc
-	jmp	sndSkip		;skip next instruction	
-sndCsum	mov	a,c		;send the checksum byte
-sndSkip	call	SEND
-
-;GET ACK ON SECTOR
-
-	MVI	B,4		;WAIT 4 SECONDS MAX
+RECV$LOOP:
+RECV$HDR:
+	MVI	B,3		;3 SEC TIMEOUT
 	CALL	RECV
-	JC	REPTB		;TIMEOUT, SEND AGAIN
+	JNC	RHNTO		;NO TIMEOUT
 
-;NO TIMEOUT SENDING SECTOR
+RECV$HDR$TIMEOUT:
+RECV$SECT$ERR:			;PURGE THE LINE OF INPUT CHARS
+	MVI	B,1		;1 SEC W/NO CHARS
+	CALL	RECV
+	JNC	RECV$SECT$ERR 	;LOOP UNTIL SENDER DONE
+	MVI	A,NAK
+	CALL	SEND		;SEND NAK
+	JMP	RECV$HDR
 
-	CPI	ACK		;ACK RECIEVED?
-	JZ	SENDB		;..YES, SEND NEXT SECT
+;GOT CHAR - MUST BE SOH OR CTRL-C TO ABORT
+
+RHNTO:	CPI	SOH
+	JZ	GOT$SOH
 	cpi	ctrlc		;control-c to abort?
 	jz	abort
-	JMP	REPTB		;PROBABLY NAK - TRY AGAIN
+	CPI	EOT
+	JZ	GOT$EOT
+	JMP	RECV$SECT$ERR
+
+GOT$SOH:
+	MVI	B,1
+	CALL	RECV
+	JC	RECV$HDR$TIMEOUT
+	MOV	D,A		;D=BLK #
+	MVI	B,1
+	CALL	RECV		;GET CMA'D SECT #
+	JC	RECV$HDR$TIMEOUT
+	CMA
+	CMP	D		;GOOD SECTOR #?
+	JZ	RECV$SECTOR
+	JMP	RECV$SECT$ERR
+
+;  Receive Sector
+
+RECV$SECTOR:
+	MOV	A,D		;GET SECTOR #
+	STA	RSECTNO
+	MVI	C,0		;INIT CKSUM
+	LXI	H,80H		;POINT TO BUFFER
+RECV$CHAR:
+	MVI	B,1		;1 SEC TIMEOUT
+	CALL	RECV		;GET CHAR
+	JC	RECV$HDR$TIMEOUT
+	MOV	M,A		;STORE CHAR
+	INR	L		;DONE?
+	JNZ	RECV$CHAR
+
+;VERIFY CHECKSUM
+
+	MOV	D,C		;SAVE CHECKSUM
+	MVI	B,1		;TIMEOUT
+	CALL	RECV		;GET CHECKSUM
+	JC	RECV$HDR$TIMEOUT
+	CMP	D		;CHECK
+	JNZ	RECV$SECT$ERR
 ;
+;GOT A SECTOR, WRITE IF = 1+PREV SECTOR
+;
+	LDA	RSECTNO
+	MOV	B,A		;SAVE IT
+	LDA	SECTNO		;GET PREV
+	INR	A		;CALC NEXT SECTOR #
+	CMP	B		;MATCH?
+	JNZ	DO$ACK
+
+;GOT NEW SECTOR - WRITE IT
+
+	LXI	D,FCB
+	MVI	C,WRITE
+	CALL	BDOS
+	ORA	A
+	JNZ	WRITE$ERROR
+	LDA	RSECTNO
+	STA	SECTNO		;UPDATE SECTOR #
+DO$ACK	MVI	A,ACK
+	CALL	SEND
+	JMP	RECV$LOOP
+
+WRITE$ERROR:
+	CALL	ERXIT
+	DB	13,10,10,'Error Writing File',13,10,'$'
+
+GOT$EOT:
+	MVI	A,ACK		;ACK THE EOT
+	CALL	SEND
+	LXI	D,FCB
+	MVI	C,CLOSE
+	CALL	BDOS
+	INR	A
+	JNZ	XFER$CPLT
+	CALL	ERXIT
+	DB	13,10,10,'Error Closing File',13,10,'$'
+;
+ERASE$OLD$FILE:
+	LXI	D,FCB
+	MVI	C,SRCHF		;SEE IF IT EXISTS
+	CALL	BDOS
+	INR	A		;FOUND?
+	RZ			;NO, RETURN
+ERAY:	LXI	D,FCB
+	MVI	C,ERASE
+	CALL	BDOS
+	RET
+;
+MAKE$NEW$FILE:
+	LXI	D,FCB
+	MVI	C,MAKE
+	CALL	BDOS
+	INR	A		;FF=BAD
+	RNZ			;OPEN OK
+
+;DIRECTORY FULL - CAN'T MAKE FILE
+	CALL	ERXIT
+	DB	13,10,10,'Error - Can''t Make File',13,10
+	DB	'(directory must be full)',13,10,'$'
 ;
 ; S U B R O U T I N E S
 ;
-;OPEN FILE
-OPEN$FILE LXI	D,FCB
-	MVI	C,OPEN
-	CALL	BDOS
-	INR	A		;OPEN OK?
-	RNZ			;GOOD OPEN
-	CALL	ERXIT
-	DB	13,10,'Can''t Open File',13,10,'$'
-
 ; - - - - - - - - - - - - - - -
+
 ;EXIT PRINTING MESSAGE FOLLOWING 'CALL ERXIT'
+
 ERXIT	POP	D		;GET MESSAGE
 	MVI	C,PRINT
 	CALL	BDOS		;PRINT MESSAGE
@@ -243,6 +285,7 @@ MCHAR	IN	BDR
 	ORA	A		;TURN OFF CARRY TO SHOW NO TIMEOUT
 	RET
 
+
 ; - - - - - - - - - - - - - - -
 ;SERIAL SEND CHAR ROUTINE
 ;----------------------------------
@@ -261,98 +304,6 @@ SENDW	IN	BCR
 sndSDR	equ	$+1		;address of I/O port for the following IN
 	OUT	BDR
 	RET
-
-;
-;FILE READ ROUTINE
-;
-READ$SECTOR:
-	LXI	D,FCB
-	MVI	C,READ
-	CALL	BDOS
-	ORA	A
-	RZ
-	DCR	A		;EOF?
-	JNZ	RDERR
-
-;EOF
-
-	XRA	A
-	STA	ERRCT
-SEOT	MVI	A,EOT
-	CALL	SEND
-	MVI	B,3		;WAIT 3 SEC FOR TIMEOUT
-	CALL	RECV
-	JC	EOTTOT		;EOT TIMEOUT
-	CPI	ACK
-	JZ	XFER$CPLT
-
-;ACK NOT RECIEVED
-
-EOTERR	LDA	ERRCT
-	INR	A
-	STA	ERRCT
-	CPI	ERRLMT
-	JC	SEOT
-	CALL	ERXIT
-	db	13,10,10
-	db	'No ACK received on EOT, but transfer is complete.',13,10,'$'
-
-;
-;TIMEOUT ON EOT
-;
-EOTTOT	JMP	EOTERR
-;
-;READ ERROR
-;
-RDERR	CALL	ERXIT
-	DB	13,10,'File Read Error',13,10,'$'
-
-;DONE - CLOSE UP SHOP
-
-XFER$CPLT:
-	CALL	ERXIT
-	DB	13,10,10,'Transfer Complete',13,10,'$'
-
-abort	call	erxit
-	DB	13,10,10,'Transfer Aborted',13,10,'$'
-
-;-----------------------------------------------------------------------------
-; calCrc - update the 16-bit CRC with one more byte. 
-;    (Copied from M. Eberhard)
-; On Entry:
-;   a has the new byte
-;   crc16 is current except this byte
-; On Exit:
-;   crc16 has been updated
-;   Trashes a,de
-;-----------------------------------------------------------------------------
-calCrc	push	b		;save bc, hl
-	push	h
-	lhld	crc16		;get CRC so far
-	xra	h		;XOR into CRC top byte
-	mov	h,a
-	lxi	b,1021h		;bc=CRC16 polynomial
-	mvi	d,8		;prepare to rotate 8 bits
-
-; do 8 bit shift/divide by CRC polynomial
-
-cRotLp	dad	h		;16-bit shift
-	jnc	cClr		;skip if bit 15 was 0
-	mov	a,h		;CRC=CRC xor 1021H
-	xra	b
-	mov	h,a
-	mov	a,l
-	xra	c
-	mov	l,a
-cClr	dcr	d
-	jnz	cRotLp		;rotate 8 times
-
-; save the updated CRC and exit
-
-	shld	crc16		;save updated CRC
-	pop	h		;restore hl, bc
-	pop	b
-	ret
 
 ;---------------------------------------
  ;  Original Kaypro Z80-SIO initialization retained for reference only.
@@ -390,24 +341,30 @@ initTbl	db	9		; Size of table
 ;-----------------------------------------
 ;  messages
 ;-----------------------------------------
-
-mRcvA	db	'Start XMODEM receive on the PC using Bondwell Port A...$'
-mRcvB	db	'Start XMODEM receive on the PC using Bondwell Port B...$'
-mHelp	db	CR,LF,'PCPUT Ver 1.1 for Bondwell 12/14',CR,LF,LF
-	db	'Transmits a file to a PC through serial Port A or Port B',CR,LF
-	db	'using XMODEM checksum or CRC mode.',CR,LF,LF
-	db	'Usage: PCPUT file.ext [B]',CR,LF
+mSendA	db	'Send file now using XMODEM on Bondwell Port A...$'
+mSendB	db	'Send file now using XMODEM on Bondwell Port B...$'
+mHelp	db	CR,LF,'PCGET Ver 1.0 for Bondwell 12/14',CR,LF,LF
+	db	'Receives a file from a PC through serial Port A or Port B',CR,LF
+	db	'using the XMODEM checksum protocol.',CR,LF,LF
+	db	'Usage: PCGET file.ext [B]',CR,LF
 	db	'  Transfer defaults to Bondwell Port A',CR,LF
 	db	'  "B" selects Bondwell Port B',CR,LF,'$'
 
-; Data Area
+;DONE - CLOSE UP SHOP
+
+XFER$CPLT:
+	CALL	ERXIT
+	DB	13,10,10,'Transfer Complete',13,10,'$'
+
+abort:	call	erxit
+	db	13,10,10,'Transfer Aborted',13,10,'$'
+
+; Data Storage
 
 	DS	40	;STACK AREA
 STACK	DS	2	;STACK POINTER
+RSECTNO	DS	1	;RECEIVED SECTOR NUMBER
 SECTNO	DS	1	;CURRENT SECTOR NUMBER 
-ERRCT	DS	1	;ERROR COUNT
-crcFlag	ds	1	;non-zero if using CRC
-crc16	ds	2	;computed crc
 
 ;
 ; BDOS EQUATES (VERSION 2)
@@ -428,7 +385,7 @@ REN	EQU	23	;0FFH=BAD
 STDMA	EQU	26
 BDOS	EQU	5
 REIPL	EQU	0
-FCB	EQU	5CH	;SYSTEM FCB
+FCB	EQU	5CH	;DEFAULT FCB
 PARAM1	EQU	FCB+1	;COMMAND LINE PARAMETER 1 IN FCB
 PARAM2	EQU	PARAM1+16	;COMMAND LINE PARAMETER 2
 	END
