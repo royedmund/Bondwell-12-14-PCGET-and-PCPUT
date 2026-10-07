@@ -1,5 +1,32 @@
 # XMODEM Transfer Utilities for the Bondwell 12/14
 
+## Quick start and file selection
+
+For XMODEM transfers, copy the chosen `.COM` utility to your CP/M disk. The `PCGETBW` / `PCPUTBW` sources preserve the existing CP/M serial configuration; the `PCGET.ASM` variant explicitly initialises the SIO. Match the serial speed and format on both computers.
+
+```text
+A>PCGETBW FILE.EXT
+A>PCPUTBW FILE.EXT
+```
+
+The default is Port A; append `B` to select Port B. Start XMODEM send on the other computer when using `PCGETBW`, or XMODEM receive when using `PCPUTBW`. The source implements 128-byte checksum XMODEM; choose a compatible mode in the host transfer tool. `PCGET` deletes an existing destination file before receiving, so choose the filename carefully.
+
+## Repository layout
+
+| Files | Purpose |
+| --- | --- |
+| `PCGET*` / `PCPUT*` | XMODEM transfer source, `.COM` executables and `.HEX` images |
+| `VT100B.*`, `VT100C.*`, `VT100DG.*` | Separate experimental terminal versions; capabilities vary |
+| `KERMTBW.COM` / `KERMTBW.HEX` | Experimental Kermit binaries; no Kermit assembly source is included |
+| `CHAROM.BIN`, `CHAROM_DEC_SPECIAL.BIN`, `BOOTROM.BIN` | Supplied ROM images |
+| PDFs, JPGs and `Kermit-80 Notes.TXT` | Hardware, character-set and protocol references |
+| [readme](readme) | Earlier short transfer notes; this README is the main guide |
+
+The flat layout suits CP/M file transfers and preserves existing links. No single reproducible build script covers all variants. Consult each assembly header for syntax and hardware assumptions; the presence of a `.COM` file alone does not prove it was rebuilt from the matching source. Retain DeRamp and other original attribution when redistributing.
+
+---
+
+
 XMODEM file transfer utilities for the Bondwell 12 and Bondwell 14 Z80 computers running CP/M 2.2 or CP/M 3.0 Plus.
 
 These utilities allow files to be transferred between a Bondwell CP/M system and any other computer that supports XMODEM send and receive.
@@ -21,7 +48,7 @@ They were adapted from the Kaypro 10 versions for use with the Bondwell 12/14 se
 
 A Bondwell-compatible version of Kermit is also under development.
 
-The current `KERMBW.COM` release is experimental and still quite buggy.
+The current `KERMTBW.COM` release is experimental and still quite buggy.
 
 Current limitations include:
 
@@ -70,7 +97,7 @@ This software should therefore be considered a limited VT100-compatible terminal
 
 ---
 
-# VT100B Demo Release
+## VT100B demo release
 
 `VT100B` provides limited VT100 and ANSI terminal emulation for the Bondwell 12/14.
 
